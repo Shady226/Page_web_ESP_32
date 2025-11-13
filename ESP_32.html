@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Commande ESP32</title>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+body { font-family:'Segoe UI',sans-serif; margin:0; background:#f0f4f8; color:#1c3f70; line-height:1.6; }
+header, footer { text-align:center; color:white; }
+header { background:#1c3f70; padding:25px; font-size:26px; font-weight:bold; box-shadow:0 5px 10px rgba(0,0,0,0.3); letter-spacing:0.5px; }
+footer { background:#4a90e2; padding:12px; font-size:14px; }
+main { display:flex; min-height:80vh; gap:25px; padding:20px; box-sizing:border-box; }
+.sidebar { width:210px; background:#1c3f70; color:white; padding:25px; display:flex; flex-direction:column; gap:18px; border-radius:12px; box-shadow:0 5px 10px rgba(0,0,0,0.25); }
+.sidebar button { background:white; color:#1c3f70; border:none; padding:10px; border-radius:10px; cursor:pointer; font-weight:bold; transition:0.3s; }
+.sidebar button:hover { background:#e0eaff; transform:scale(1.05); }
+.content { flex:1; padding:20px; display:flex; flex-direction:column; gap:30px; align-items:center; }
+.card { background:white; padding:35px; border-radius:16px; box-shadow:0 6px 15px rgba(0,0,0,0.15); width:90%; max-width:850px; text-align:center; transition:0.3s; }
+.card:hover { transform:translateY(-3px); }
+.card h3 { margin-top:0; color:#1c3f70; margin-bottom:20px; letter-spacing:0.5px; }
+.bulb { position:relative; width:120px; height:160px; margin:25px auto; background:radial-gradient(circle at center,#ccc 10%,#999 80%); border-radius:50px 50px 40px 40px; box-shadow:inset 0 0 20px rgba(0,0,0,0.3); transition:0.5s; }
+.bulb::after { content:""; position:absolute; bottom:-20px; left:50%; transform:translateX(-50%); width:40px; height:25px; background:#666; border-radius:5px; }
+.bulb.on { background:radial-gradient(circle at center,#ffd1d1 10%,#ff4d4d 70%); box-shadow:0 0 60px 25px rgba(255,77,77,0.6); }
+.bulb.blinking { background: radial-gradient(circle at center,#ffcccc 10%,#ff4d4d 70%); box-shadow: 0 0 60px 25px rgba(255,0,0,0.8); }
+.status-cards { display:flex; gap:25px; flex-wrap:wrap; justify-content:center; margin-bottom:15px; }
+.status-card { flex:1; min-width:160px; padding:15px; border-radius:12px; box-shadow:0 5px 10px rgba(0,0,0,0.1); text-align:center; font-weight:bold; }
+.status-connected { background:#d4edda; color:#155724; }
+.status-reconnecting { background:#fff3cd; color:#856404; animation:pulse 1.5s infinite; }
+.status-error { background:#f8d7da; color:#721c24; }
+@keyframes pulse { 0%,100%{transform:scale(1);}50%{transform:scale(1.05);} }
+.btn { background:#1c3f70; color:white; border:none; border-radius:10px; padding:10px 22px; font-weight:bold; cursor:pointer; transition:0.3s; margin-top:10px; }
+.btn:hover { background:#4a90e2; transform:scale(1.05); }
+input[type="time"], input[type="number"] { padding:10px; border-radius:6px; border:1px solid #ccc; width:130px; }
+.history-table { width:100%; border-collapse:collapse; margin-top:15px; }
+.history-table th, .history-table td { border:1px solid #4a90e2; padding:10px; text-align:center; }
+.history-table th { background:#1c3f70; color:white; }
+.history-table tbody tr:nth-child(even){ background:#e9eff7; }
+.hidden { display:none; }
+@media(max-width:800px){ main { flex-direction:column; gap:15px; } .sidebar { width:100%; flex-direction:row; justify-content:center; flex-wrap:wrap; } }
+</style>
+</head>
+<body>
+
+<header>💡 Commande de la LED ESP32</header>
+
+<main>
+  <div class="sidebar hidden" id="autoSidebar">
+    <button onclick="showAutoTab('autoRealTab')">Mode Réel</button>
+    <button onclick="showAutoTab('autoFakeTab')">Mode Fictif</button>
+    <button onclick="showAutoTab('autoHistoryTab')">Historique</button>
+    <button onclick="goHome()">🏠 Retour</button>
+  </div>
+
+  <div class="content">
+    <div id="home" class="card">
+      <h2>Bienvenue sur le site de commande de l’ESP32</h2>
+      <p>Choisissez un mode de fonctionnement :</p>
+      <button class="btn" onclick="goManual()">Mode Manuel</button>
+      <button class="btn" onclick="goAuto()">Mode Automatique</button>
+    </div>
+
+    <div id="manualTab" class="card hidden">
+      <h3>Mode Manuel</h3>
+      <div class="status-cards">
+        <div class="status-card" id="espCardManual">ESP32 : Connexion...</div>
+        <div class="status-card" id="webCardManual">Page Web : Connexion MQTT...</div>
+      </div>
+      <div id="ledManual" class="bulb"></div>
+      <div>
+        <button class="btn" onclick="ledOn()">Allumer</button>
+        <button class="btn" onclick="ledOff()">Éteindre</button>
+      </div>
+      <p id="manualStatus">Aucune action</p>
+      <button class="btn" onclick="goHome()">Retour</button>
+    </div>
+
+    <div id="autoRealTab" class="card hidden">
+      <h3>Mode Réel</h3>
+      <div class="status-cards">
+        <div class="status-card" id="espCardReal">ESP32 : Connexion...</div>
+        <div class="status-card" id="webCardReal">Page Web : Connexion MQTT...</div>
+      </div>
+      <div id="ledReal" class="bulb"></div>
+      <div style="display:flex; justify-content:center; gap:15px; flex-wrap:wrap;">
+        <div><label>Heure début :</label><br><input type="time" id="startTime"></div>
+        <div><label>Durée (min) :</label><br><input type="number" id="duration" min="1" value="1"></div>
+        <button class="btn" onclick="setAuto()">Programmer</button>
+      </div>
+      <p>Temps restant : <span id="realCountdown">00:00:00</span></p>
+      <p id="autoStatusReal">Aucune programmation</p>
+    </div>
+
+    <div id="autoFakeTab" class="card hidden">
+      <h3>Mode Fictif</h3>
+      <div class="status-cards">
+        <div class="status-card" id="espCardFake">ESP32 : Connexion...</div>
+        <div class="status-card" id="webCardFake">Page Web : Connexion MQTT...</div>
+      </div>
+      <div style="display:flex; gap:18px; flex-wrap:wrap; justify-content:center;">
+        <div><label>Heure de début fictive :</label><br><input type="time" id="fakeStart"></div>
+        <div><label>Heure actuelle fictive :</label><br><input type="time" id="fakeCurrent"></div>
+        <div><label>Durée (min) :</label><br><input type="number" id="fakeDuration" min="1" value="1"></div>
+        <button class="btn" onclick="testFakeTime()">Lancer test</button>
+      </div>
+      <div id="ledFake" class="bulb"></div>
+      <p>Temps restant : <span id="fakeCountdown">00:00:00</span></p>
+      <p id="autoStatusFake">Aucune programmation</p>
+    </div>
+
+    <div id="autoHistoryTab" class="card hidden">
+      <h3>Historique hebdomadaire</h3>
+      <table class="history-table">
+        <thead><tr><th>Date</th><th>Début</th><th>Fin</th><th>Durée</th><th>État</th></tr></thead>
+        <tbody id="historyBody"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<footer>MQTT HiveMQ Cloud • ESP32 Project</footer>
+
+<script>
+function goHome(){ hideAll(); document.getElementById("home").classList.remove("hidden"); document.getElementById("autoSidebar").classList.add("hidden"); }
+function goManual(){ hideAll(); document.getElementById("manualTab").classList.remove("hidden"); document.getElementById("autoSidebar").classList.add("hidden"); }
+function goAuto(){ hideAll(); document.getElementById("autoSidebar").classList.remove("hidden"); document.getElementById("autoRealTab").classList.remove("hidden"); }
+function showAutoTab(tab){ hideAutoTabs(); document.getElementById(tab).classList.remove("hidden"); if(tab==="autoHistoryTab") updateHistory(); }
+function hideAll(){ ["home","manualTab","autoRealTab","autoFakeTab","autoHistoryTab"].forEach(id=>document.getElementById(id).classList.add("hidden")); }
+function hideAutoTabs(){ ["autoRealTab","autoFakeTab","autoHistoryTab"].forEach(id=>document.getElementById(id).classList.add("hidden")); }
+
+// ------------------ MQTT ------------------
+const broker="wss://e09d65b88c3447d6a4114b67de3ace3f.s1.eu.hivemq.cloud:8884/mqtt";
+const options={username:"Admin",password:"Esp32...",reconnectPeriod:2000};
+const topicCmd="esp32/led/commande", topicEtat="esp32/led/etat", topicBlink="esp32/led/blink";
+const client=mqtt.connect(broker,options);
+const ledManual=document.getElementById("ledManual"), ledReal=document.getElementById("ledReal"), ledFake=document.getElementById("ledFake");
+let history=[];
+
+client.on("message",(t,m)=>{ 
+  if(t===topicEtat){ 
+    const on=m.toString()==="ON"; 
+    [ledManual, ledReal, ledFake].forEach(l=>l.classList.toggle("on",on)); 
+    [ledManual, ledReal, ledFake].forEach(l=>l.classList.remove("blinking")); // stop clignotement si allumé
+  } 
+});
+
+let wifiBlinkTimer = null;
+
+function updateStatus(){
+  const connected = client.connected;
+  const wifiOK = navigator.onLine;
+
+  ["Manual","Real","Fake"].forEach(m=>{
+    const esp = document.getElementById("espCard"+m);
+    const web = document.getElementById("webCard"+m);
+
+    if(wifiOK){
+      esp.className="status-card status-connected";
+      esp.innerText="ESP32 : WiFi OK ✅";
+      clearInterval(wifiBlinkTimer);
+      wifiBlinkTimer = null;
+      [ledManual, ledReal, ledFake].forEach(l => l.classList.remove("blinking"));
+      if(client.connected) client.publish(topicBlink,"OFF");
+    } else {
+      esp.className="status-card status-error";
+      esp.innerText="ESP32 : WiFi perdu ❌";
+      if(!wifiBlinkTimer){
+        wifiBlinkTimer = setInterval(()=>{
+          [ledManual, ledReal, ledFake].forEach(l => l.classList.toggle("blinking"));
+        }, 500);
+        if(client.connected) client.publish(topicBlink,"ON");
+      }
+    }
+
+    web.className = "status-card " + (connected?"status-connected":"status-reconnecting");
+    web.innerText = connected ? "Page Web : Broker OK ✅" : "Page Web : Connexion MQTT...";
+  });
+}
+setInterval(updateStatus,500);
+
+// ------------------ LED Manuel ------------------
+function ledOn(){ if(client.connected) client.publish(topicCmd,"ON"); ledManual.classList.add("on"); ledManual.classList.remove("blinking"); document.getElementById("manualStatus").innerText="LED allumée (manuel)"; }
+function ledOff(){ if(client.connected) client.publish(topicCmd,"OFF"); ledManual.classList.remove("on"); document.getElementById("manualStatus").innerText="LED éteinte (manuel)"; }
+
+// ------------------ Mode Auto et Fictif ------------------
+let autoStart=null, autoDuration=0;
+function setAuto(){ const start=document.getElementById("startTime").value, dur=parseInt(document.getElementById("duration").value); if(!start||!dur){ alert("Renseignez l'heure et la durée"); return; } autoStart=start; autoDuration=dur; document.getElementById("autoStatusReal").innerText=`Programmation : ${start} (${dur} min)`; }
+setInterval(()=>{
+  if(!autoStart) return;
+  const now=new Date(), [h,m]=autoStart.split(":").map(Number);
+  const start=new Date(); start.setHours(h,m,0,0); const end=new Date(start.getTime()+autoDuration*60000);
+  if(now>=start && now<end){ if(!ledReal.classList.contains("on")){ ledReal.classList.add("on"); if(client.connected) client.publish(topicCmd,"ON"); } const rem=end-now; document.getElementById("realCountdown").innerText=formatTime(rem); }
+  else if(now>=end && ledReal.classList.contains("on")){ ledReal.classList.remove("on"); if(client.connected) client.publish(topicCmd,"OFF"); addHistory("Réel",autoStart,end,autoDuration); autoStart=null; }
+},1000);
+
+let fakeRunning=false, fakeTimer=null, fakeStartTime=null, fakeDuration=0;
+function testFakeTime(){
+  const start=document.getElementById("fakeStart").value, current=document.getElementById("fakeCurrent").value, dur=parseInt(document.getElementById("fakeDuration").value);
+  if(!start||!current||!dur){ alert("Renseignez les heures"); return; }
+  const [sh,sm]=start.split(":").map(Number), [ch,cm]=current.split(":").map(Number);
+  if(sh!==ch||sm!==cm){ document.getElementById("autoStatusFake").innerText="Les heures fictives ne concordent pas"; return; }
+
+  fakeStartTime=start; fakeDuration=dur*60;
+  ledFake.classList.add("on"); if(client.connected) client.publish(topicCmd,"ON");
+  document.getElementById("autoStatusFake").innerText=`LED allumée (fictif) pendant ${dur} min`;
+
+  let remaining=fakeDuration;
+  clearInterval(fakeTimer);
+  fakeTimer=setInterval(()=>{
+    remaining--;
+    document.getElementById("fakeCountdown").innerText=formatTime(remaining*1000);
+    if(remaining<=0){
+      clearInterval(fakeTimer);
+      ledFake.classList.remove("on");
+      if(client.connected) client.publish(topicCmd,"OFF");
+      addHistory("Fictif",fakeStartTime,new Date(),dur);
+      document.getElementById("autoStatusFake").innerText="LED éteinte (fictif)";
+    }
+  },1000);
+}
+
+// ------------------ Historique ------------------
+function addHistory(mode,start,end,dur){
+  const now=new Date().toLocaleDateString();
+  const entry={date:now,debut:start,fin:end.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}), duree:dur+" min", etat:mode+" ✅"};
+  history.unshift(entry); updateHistory();
+}
+function updateHistory(){
+  const tbody=document.getElementById("historyBody");
+  tbody.innerHTML=history.map(h=>`<tr><td>${h.date}</td><td>${h.debut}</td><td>${h.fin}</td><td>${h.duree}</td><td>${h.etat}</td></tr>`).join("");
+}
+function formatTime(ms){ const s=Math.floor(ms/1000), h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=s%60; return `${h.toString().padStart(2,"0")}:${m.toString().padStart(2,"0")}:${sec.toString().padStart(2,"0")}`; }
+</script>
+
+</body>
+</html>
